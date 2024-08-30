@@ -38,6 +38,8 @@ executable servant-tutorial
                     , servant
                     , servant-server
                     , servant-client
+                    , servant-lucid
+                    , servant-blaze
                     , string-conversions
                     , lucid
                     , http-media

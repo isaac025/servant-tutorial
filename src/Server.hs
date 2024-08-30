@@ -30,6 +30,7 @@ import Network.HTTP.Media ((//), (/:))
 import Network.Wai
 import Network.Wai.Handler.Warp
 import Servant
+import Servant.HTML.Lucid
 import Servant.Types.SourceT
 import System.Directory
 import Text.Blaze
@@ -188,3 +189,40 @@ app3 = serve api server3
  - QueryParams "something" a gets turned into type [a]
  - ReqBody contentTypes a gets turned to arg of type a
 -}
+
+type PersonAPI = "persons" :> Get '[JSON, HTML] [Person]
+
+data Person = Person
+    { firstName :: String
+    , lastName :: String
+    }
+    deriving (Generic)
+
+instance ToJSON Person
+
+instance ToHtml Person where
+    toHtml person =
+        tr_ $ do
+            td_ (toHtml $ firstName person)
+            td_ (toHtml $ lastName person)
+    toHtmlRaw = toHtml
+
+instance ToHtml [Person] where
+    toHtml persons = table_ $ do
+        tr_ $ do
+            th_ "first name"
+            th_ "last name"
+        foldMap toHtml persons
+    toHtmlRaw = toHtml
+
+people :: [Person]
+people = [Person "Isaac" "Newton", Person "Albert" "Einstein"]
+
+personAPI :: Proxy PersonAPI
+personAPI = Proxy
+
+server4 :: Server PersonAPI
+server4 = pure people
+
+app4 :: Application
+app4 = serve personAPI server4
