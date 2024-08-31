@@ -383,6 +383,7 @@ newtype Token = Token ByteString
 newtype SecretData = SecretData ByteString
 
 -- Define APIs modularly and assemble them in one big API
+-- Exercise: Implement this server
 type UsersAPI =
     Get '[JSON] [User]
         :<|> ReqBody '[JSON] User :> PostNoContent
@@ -411,3 +412,68 @@ usersServer = getUsers :<|> newUser :<|> userOperations
 
         deleteUser :: Int -> Handler NoContent
         deleteUser = error "..."
+
+type ProductsAPI =
+    Get '[JSON] [Product]
+        :<|> ReqBody '[JSON] Product :> PostNoContent
+        :<|> Capture "productid" Int
+            :> ( Get '[JSON] Product
+                    :<|> ReqBody '[JSON] Product :> PutNoContent
+                    :<|> DeleteNoContent
+               )
+
+newtype Product = Product {productId :: Int}
+
+productsServer :: Server ProductsAPI
+productsServer = getProducts :<|> newProduct :<|> productOperations
+  where
+    getProducts :: Handler [Product]
+    getProducts = error "..."
+
+    newProduct :: Product -> Handler NoContent
+    newProduct = error "..."
+
+    productOperations productid = viewProduct productid :<|> updateProduct productid :<|> deleteProduct productid
+      where
+        viewProduct :: Int -> Handler Product
+        viewProduct = error "..."
+
+        updateProduct :: Int -> Product -> Handler NoContent
+        updateProduct = error "..."
+
+        deleteProduct :: Int -> Handler NoContent
+        deleteProduct = error "..."
+
+type CombinedAPI =
+    "users" :> UsersAPI
+        :<|> "products" :> ProductsAPI
+
+server10 :: Server CombinedAPI
+server10 = usersServer :<|> productsServer
+
+-- Realize that UsersAPI and ProductsAPI are similar
+type APIFor a i =
+    Get '[JSON] [a]
+        :<|> ReqBody '[JSON] a :> PostNoContent
+        :<|> Capture "id" i
+            :> ( Get '[JSON] a
+                    :<|> ReqBody '[JSON] a :> PutNoContent
+                    :<|> DeleteNoContent
+               )
+
+serverFor ::
+    Handler [a] ->
+    (a -> Handler NoContent) ->
+    (i -> Handler a) ->
+    (i -> a -> Handler NoContent) ->
+    (i -> Handler NoContent) ->
+    Server (APIFor a i)
+serverFor = error "..."
+
+-- Use emptyServer when using EmptyAPI combinator
+type CombinedAPI2 = API :<|> "empty" :> EmptyAPI
+
+server11 :: Server CombinedAPI2
+server11 = server3 :<|> emptyServer
+
+-- Using another monad
