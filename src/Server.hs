@@ -382,4 +382,32 @@ type API3 =
 newtype Token = Token ByteString
 newtype SecretData = SecretData ByteString
 
+-- Define APIs modularly and assemble them in one big API
+type UsersAPI =
+    Get '[JSON] [User]
+        :<|> ReqBody '[JSON] User :> PostNoContent
+        :<|> Capture "userid" Int
+            :> ( Get '[JSON] User
+                    :<|> ReqBody '[JSON] User :> PutNoContent
+                    :<|> DeleteNoContent
+               )
 
+usersServer :: Server UsersAPI
+usersServer = getUsers :<|> newUser :<|> userOperations
+  where
+    getUsers :: Handler [User]
+    getUsers = error "..."
+
+    newUser :: User -> Handler NoContent
+    newUser = error "..."
+
+    userOperations userid = viewUser userid :<|> updateUser userid :<|> deleteUser userid
+      where
+        viewUser :: Int -> Handler User
+        viewUser = error "..."
+
+        updateUser :: Int -> User -> Handler NoContent
+        updateUser = error "..."
+
+        deleteUser :: Int -> Handler NoContent
+        deleteUser = error "..."
