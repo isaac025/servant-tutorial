@@ -31,7 +31,7 @@ import Network.Wai
 import Network.Wai.Handler.Warp
 import Servant
 import Servant.HTML.Lucid
-import Servant.Types.SourceT
+import Servant.Types.SourceT (source)
 import System.Directory
 import Text.Blaze
 import qualified Text.Blaze.Html
@@ -226,3 +226,160 @@ server4 = pure people
 
 app4 :: Application
 app4 = serve personAPI server4
+
+-- Handler is newtype a wrapper around ExceptT ServerError IO
+-- we can return success or fail with throwError
+-- Handler == IO (Either ServerError a)
+-- to run any IO computation just use liftIO
+type IOAPI1 = "myfile.txt" :> Get '[JSON] FileContent
+
+newtype FileContent = FileContent {content :: String}
+    deriving (Generic)
+
+instance ToJSON FileContent
+
+server5 :: Server IOAPI1
+server5 = do
+    fileContent <- liftIO (readFile "myfile.txt")
+    pure (FileContent fileContent)
+
+ioAPI1 :: Proxy IOAPI1
+ioAPI1 = Proxy
+
+app5 :: Application
+app5 = serve ioAPI1 server5
+
+-- ServerError lets you explicitly fail by using throwError
+-- ServerError lets you provide:
+-- HTTP Status code
+-- error message
+-- error body
+-- error headers
+failingHandler :: Handler ()
+failingHandler = throwError myerr
+  where
+    myerr :: ServerError
+    myerr = err503{errBody = "Sorry dear user."}
+
+server6 :: Server IOAPI1
+server6 = do
+    exists <- liftIO (doesFileExist "myfile.txt")
+    if exists
+        then liftIO (readFile "myfile.txt") >>= pure . FileContent
+        else throwError custom404err
+  where
+    custom404err = err404{errBody = "myfile.txt just isn't there, please leave this server alone."}
+
+app6 :: Application
+app6 = serve ioAPI1 server6
+
+-- Adding headers to a response changes the type of your API also
+type MyHandler = Get '[JSON] (Headers '[Header "X-An-Int" Int] User)
+
+myHandler :: Server MyHandler
+myHandler = pure $ addHeader 1797 albert
+
+myHandlerAPI :: Proxy MyHandler
+myHandlerAPI = Proxy
+
+app7 :: Application
+app7 = serve myHandlerAPI myHandler
+
+type MyHeadfulHandler = Get '[JSON] (Headers '[Header "X-A-Bool" Bool, Header "X-An-Int" Int] User)
+
+myHeadfulHandler :: Server MyHeadfulHandler
+myHeadfulHandler = pure $ addHeader True $ addHeader 1797 albert
+
+myHeadfulHandlerAPI :: Proxy MyHeadfulHandler
+myHeadfulHandlerAPI = Proxy
+
+app8 :: Application
+app8 = serve myHeadfulHandlerAPI myHeadfulHandler
+
+-- What if sometimes pass a header:
+type MyMaybeHeaderHandler = Capture "withHeader" Bool :> Get '[JSON] (Headers '[Header "X-An-Int" Int] User)
+
+myMaybeHeaderHandler :: Server MyMaybeHeaderHandler
+myMaybeHeaderHandler x =
+    pure
+        $ if x
+            then addHeader 1797 albert
+            else noHeader isaac
+
+maybeHeaderHandlerAPI :: Proxy MyMaybeHeaderHandler
+maybeHeaderHandlerAPI = Proxy
+
+app9 :: Application
+app9 = serve maybeHeaderHandlerAPI myMaybeHeaderHandler
+
+-- Serving contents of a directory
+-- Use of Raw combinator to mean "plug here any WAI application"
+-- serveDirectoryWebApp a function to get a file and directory and serve
+type StaticAPI = "static" :> Raw
+
+staticAPI :: Proxy StaticAPI
+staticAPI = Proxy
+
+server7 :: Server StaticAPI
+server7 = serveDirectoryWebApp "static-files"
+
+app10 :: Application
+app10 = serve staticAPI server7
+
+-- Nested apis to avoid repetition
+type UserAPI3 =
+    Capture "userid" Int :> Get '[JSON] User
+        :<|> Capture "userid" Int :> DeleteNoContent
+
+-- Like an algebra equation, factor out the Captuer
+type UserAPI4 =
+    Capture "userid" Int
+        :> ( Get '[JSON] User
+                :<|> DeleteNoContent
+           )
+
+-- notice the difference in server implementation
+server8 :: Server UserAPI3
+server8 = getUser :<|> deleteUser
+  where
+    getUser :: Int -> Handler User
+    getUser _userid = error "..."
+
+    deleteUser :: Int -> Handler NoContent
+    deleteUser _userid = error "..."
+
+server9 :: Server UserAPI4
+server9 userid = getUser userid :<|> deleteUser userid
+  where
+    getUser :: Int -> Handler User
+    getUser = error "..."
+
+    deleteUser :: Int -> Handler NoContent
+    deleteUser = error "..."
+
+-- More factoring out apis (nested apis)
+-- factor out path
+type API1 =
+    "users"
+        :> ( Get '[JSON] [User]
+                :<|> Capture "userid" Int :> Get '[JSON] User
+           )
+
+-- factor out a reqbody
+type API2 =
+    ReqBody '[JSON] User
+        :> ( Get '[JSON] User
+                :<|> PostNoContent
+           )
+
+-- factor out a header
+type API3 =
+    Header "Authorization" Token
+        :> ( Get '[JSON] SecretData
+                :<|> ReqBody '[JSON] SecretData :> PostNoContent
+           )
+
+newtype Token = Token ByteString
+newtype SecretData = SecretData ByteString
+
+
