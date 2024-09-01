@@ -48,6 +48,7 @@ data User = User
     deriving (Eq, Show, Generic)
 
 instance ToJSON User
+instance FromJSON User
 
 users1 :: [User]
 users1 =
@@ -397,21 +398,30 @@ usersServer :: Server UsersAPI
 usersServer = getUsers :<|> newUser :<|> userOperations
   where
     getUsers :: Handler [User]
-    getUsers = error "..."
+    getUsers = pure (users1 <> users2)
 
     newUser :: User -> Handler NoContent
-    newUser = error "..."
+    newUser u = do
+        let users = u : (users1 <> users2)
+        _ <- liftIO $ mapM_ print users
+        pure NoContent
 
     userOperations userid = viewUser userid :<|> updateUser userid :<|> deleteUser userid
       where
         viewUser :: Int -> Handler User
-        viewUser = error "..."
+        viewUser uid = pure $ (users1 <> users2) !! uid
 
         updateUser :: Int -> User -> Handler NoContent
-        updateUser = error "..."
+        updateUser uid user = do
+            let users = Data.List.take uid (users1 <> users2) ++ [user] ++ drop uid (users1 <> users2)
+            _ <- liftIO $ mapM_ print users
+            pure NoContent
 
         deleteUser :: Int -> Handler NoContent
-        deleteUser = error "..."
+        deleteUser uid = do
+            let users = Data.List.take uid (users1 <> users2) ++ drop uid (users1 <> users2)
+            _ <- liftIO $ mapM_ print users
+            pure NoContent
 
 type ProductsAPI =
     Get '[JSON] [Product]
@@ -423,26 +433,45 @@ type ProductsAPI =
                )
 
 newtype Product = Product {productId :: Int}
+    deriving (Generic, Show, Eq)
+
+instance ToJSON Product
+instance FromJSON Product
+
+products :: [Product]
+products = [Product 1, Product 2, Product 3]
 
 productsServer :: Server ProductsAPI
 productsServer = getProducts :<|> newProduct :<|> productOperations
   where
     getProducts :: Handler [Product]
-    getProducts = error "..."
+    getProducts = pure products
 
     newProduct :: Product -> Handler NoContent
-    newProduct = error "..."
+    newProduct p = do
+        _ <- liftIO $ mapM_ print (p : products)
+        pure NoContent
 
     productOperations productid = viewProduct productid :<|> updateProduct productid :<|> deleteProduct productid
       where
         viewProduct :: Int -> Handler Product
-        viewProduct = error "..."
+        viewProduct pid = do
+            let p = find ((== pid) . productId) products
+            case p of
+                Nothing -> throwError (err404{errBody = "Product doesn't exist"})
+                Just p' -> pure p'
 
         updateProduct :: Int -> Product -> Handler NoContent
-        updateProduct = error "..."
+        updateProduct pid p = do
+            let products' = [if productId x == pid then p else x | x <- products]
+            _ <- liftIO $ mapM_ print products'
+            pure NoContent
 
         deleteProduct :: Int -> Handler NoContent
-        deleteProduct = error "..."
+        deleteProduct pid = do
+            let products' = filter ((/= pid) . productId) products
+            _ <- liftIO $ mapM_ print products'
+            pure NoContent
 
 type CombinedAPI =
     "users" :> UsersAPI
@@ -450,6 +479,12 @@ type CombinedAPI =
 
 server10 :: Server CombinedAPI
 server10 = usersServer :<|> productsServer
+
+combinedAPI :: Proxy CombinedAPI
+combinedAPI = Proxy
+
+app11 :: Application
+app11 = serve combinedAPI server10
 
 -- Realize that UsersAPI and ProductsAPI are similar
 type APIFor a i =
@@ -477,3 +512,49 @@ server11 :: Server CombinedAPI2
 server11 = server3 :<|> emptyServer
 
 -- Using another monad
+-- Server is Server api = ServerT api Handler
+-- which using another monad our endpoint becomes:
+-- ServerT (Get '[JSON] Person) SomeMonad
+-- and the result would be: SomeMonad Person
+readerToHandler :: Reader String a -> Handler a
+readerToHandler r = pure (runReader r "hi")
+
+type ReaderAPI =
+    "a" :> Get '[JSON] Int
+        :<|> "b" :> ReqBody '[JSON] Double :> Get '[JSON] Bool
+
+readerAPI :: Proxy ReaderAPI
+readerAPI = Proxy
+
+readerServerT :: ServerT ReaderAPI (Reader String)
+readerServerT = a :<|> b
+  where
+    a :: Reader String Int
+    a = pure 1797
+
+    b :: Double -> Reader String Bool
+    b _ = asks (== "hi")
+
+-- we cannot run app = serve readerAPI readerServerT
+-- we have to use hoistServer
+readerServer :: Server ReaderAPI
+readerServer = hoistServer readerAPI readerToHandler readerServerT
+
+app12 :: Application
+app12 = serve readerAPI readerServer
+
+-- Rewrite Reader Server as an arrow
+funServerT :: ServerT ReaderAPI ((->) String)
+funServerT = a :<|> b
+  where
+    a :: String -> Int
+    a _ = 1797
+
+    b :: Double -> String -> Bool
+    b _ s = s == "hi"
+
+funToHandler :: (String -> a) -> Handler a
+funToHandler f = pure (f "hi")
+
+app13 :: Application
+app13 = serve readerAPI (hoistServer readerAPI funToHandler funServerT)
